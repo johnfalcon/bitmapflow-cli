@@ -8,3 +8,4 @@ examples/_interpolated
 *.so
 *.afphoto
 *.blend
+target/
