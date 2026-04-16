@@ -1,0 +1,146 @@
+name: Build CLI
+
+on:
+  push:
+    branches: [main, claude/**]
+    paths:
+      - "cli/**"
+      - ".github/workflows/cli-build.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "cli/**"
+      - ".github/workflows/cli-build.yml"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+defaults:
+  run:
+    working-directory: cli
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: bitmapflow-cli
+            archive: bitmapflow-cli-linux-x86_64.tar.gz
+
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: bitmapflow-cli.exe
+            archive: bitmapflow-cli-windows-x86_64.zip
+
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: bitmapflow-cli
+            archive: bitmapflow-cli-macos-arm64.tar.gz
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install OpenCV (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libopencv-dev libopencv-contrib-dev libclang-dev
+
+      - name: Install OpenCV (macOS)
+        if: runner.os == 'macOS'
+        run: brew install opencv llvm
+
+      - name: Install OpenCV (Windows)
+        if: runner.os == 'Windows'
+        run: choco install opencv llvm -y
+        shell: pwsh
+
+      - name: Set OpenCV env (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          $opencvDir = (Get-ChildItem "C:\tools\opencv\build" -Directory | Select-Object -First 1).FullName
+          echo "OPENCV_LINK_PATHS=$opencvDir\x64\vc16\lib" >> $env:GITHUB_ENV
+          echo "OPENCV_INCLUDE_PATHS=$opencvDir\include" >> $env:GITHUB_ENV
+          echo "OPENCV_LINK_LIBS=opencv_world4100" >> $env:GITHUB_ENV
+        shell: pwsh
+
+      - name: Set LLVM path (macOS)
+        if: runner.os == 'macOS'
+        run: echo "LLVM_CONFIG_PATH=$(brew --prefix llvm)/bin/llvm-config" >> $GITHUB_ENV
+
+      - name: Cargo build
+        run: cargo build --release
+
+      - name: Package (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: tar czf ${{ matrix.archive }} -C target/release ${{ matrix.artifact }}
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        run: Compress-Archive -Path target\release\${{ matrix.artifact }} -DestinationPath ${{ matrix.archive }}
+        shell: pwsh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.archive }}
+          if-no-files-found: error
+          path: cli/${{ matrix.archive }}
+
+  release:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(grep '^version' cli/Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+        working-directory: .
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: cli-v${{ steps.version.outputs.version }}
+          name: bitmapflow-cli v${{ steps.version.outputs.version }}
+          body: |
+            ## bitmapflow-cli v${{ steps.version.outputs.version }}
+
+            CLI tool for generating animation inbetween frames using optical flow.
+
+            ### Requirements
+            - **Linux**: OpenCV 4.x (`sudo apt install libopencv-dev libopencv-contrib-dev`)
+            - **macOS**: OpenCV 4.x (`brew install opencv`)
+            - **Windows**: OpenCV 4.x (included or install via choco)
+
+            ### Usage
+            ```
+            bitmapflow-cli \
+              --input sprite.png \
+              --output interpolated.png \
+              --frame-width 100 --frame-height 100 --frame-count 5 \
+              --inbetweens 1 --loop --columns 5 --json
+            ```
+          files: |
+            artifacts/**/*
+          draft: false
+          prerelease: false
