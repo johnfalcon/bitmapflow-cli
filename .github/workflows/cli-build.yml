@@ -65,6 +65,10 @@ jobs:
         if: runner.os == 'macOS'
         run: echo "LLVM_CONFIG_PATH=$(brew --prefix llvm)/bin/llvm-config" >> $GITHUB_ENV
 
+      - name: Setup MSVC environment (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Install OpenCV and LLVM (Windows)
         if: runner.os == 'Windows'
         run: choco install opencv llvm -y
@@ -73,13 +77,10 @@ jobs:
       - name: Set OpenCV env (Windows)
         if: runner.os == 'Windows'
         run: |
-          # Find the opencv build directory
           $buildDir = "C:\tools\opencv\build"
-          Write-Host "OpenCV build dir: $buildDir"
-          Get-ChildItem $buildDir -Recurse -Filter "*.lib" | Select-Object -First 10 | ForEach-Object { Write-Host "Found lib: $($_.FullName)" }
 
           # Find the world lib dynamically
-          $worldLib = Get-ChildItem $buildDir -Recurse -Filter "opencv_world*.lib" | Select-Object -First 1
+          $worldLib = Get-ChildItem $buildDir -Recurse -Filter "opencv_world*.lib" | Where-Object { $_.Name -notmatch 'd\.lib$' } | Select-Object -First 1
           if (-not $worldLib) {
             Write-Error "Could not find opencv_world*.lib"
             exit 1
@@ -87,29 +88,17 @@ jobs:
           Write-Host "Using OpenCV lib: $($worldLib.FullName)"
 
           $libDir = $worldLib.DirectoryName
-          $libName = $worldLib.BaseName  # e.g. opencv_world490
-
-          # Find include dir
-          $includeDir = "$buildDir\include"
-          if (-not (Test-Path $includeDir)) {
-            Write-Error "Include dir not found: $includeDir"
-            exit 1
-          }
-
-          Write-Host "OPENCV_LINK_PATHS=$libDir"
-          Write-Host "OPENCV_INCLUDE_PATHS=$includeDir"
-          Write-Host "OPENCV_LINK_LIBS=$libName"
+          $libName = $worldLib.BaseName
 
           echo "OPENCV_LINK_PATHS=$libDir" >> $env:GITHUB_ENV
-          echo "OPENCV_INCLUDE_PATHS=$includeDir" >> $env:GITHUB_ENV
+          echo "OPENCV_INCLUDE_PATHS=$buildDir\include" >> $env:GITHUB_ENV
           echo "OPENCV_LINK_LIBS=$libName" >> $env:GITHUB_ENV
+          echo "LIBCLANG_PATH=C:\Program Files\LLVM\bin" >> $env:GITHUB_ENV
 
-          # Set LIBCLANG_PATH for clang-runtime feature
-          $llvmBin = "C:\Program Files\LLVM\bin"
-          if (Test-Path $llvmBin) {
-            Write-Host "LIBCLANG_PATH=$llvmBin"
-            echo "LIBCLANG_PATH=$llvmBin" >> $env:GITHUB_ENV
-          }
+          # Add OpenCV DLLs to PATH so the binding generator can find them at runtime
+          $dllDir = $worldLib.DirectoryName -replace '\\lib$', '\bin'
+          echo "$dllDir" >> $env:GITHUB_PATH
+          echo "C:\Program Files\LLVM\bin" >> $env:GITHUB_PATH
         shell: pwsh
 
       - name: Cargo build
