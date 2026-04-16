@@ -6,6 +6,8 @@ on:
     paths:
       - "cli/**"
       - ".github/workflows/cli-build.yml"
+    tags:
+      - "cli-v*"
   pull_request:
     branches: [main]
     paths:
@@ -97,7 +99,7 @@ jobs:
 
   release:
     needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: startsWith(github.ref, 'refs/tags/cli-v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
