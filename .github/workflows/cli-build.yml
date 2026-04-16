@@ -29,17 +29,10 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
             artifact: bitmapflow-cli
             archive: bitmapflow-cli-linux-x86_64.tar.gz
 
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact: bitmapflow-cli.exe
-            archive: bitmapflow-cli-windows-x86_64.zip
-
           - os: macos-latest
-            target: aarch64-apple-darwin
             artifact: bitmapflow-cli
             archive: bitmapflow-cli-macos-arm64.tar.gz
 
@@ -65,53 +58,11 @@ jobs:
         if: runner.os == 'macOS'
         run: echo "LLVM_CONFIG_PATH=$(brew --prefix llvm)/bin/llvm-config" >> $GITHUB_ENV
 
-      - name: Setup MSVC environment (Windows)
-        if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1
-
-      - name: Install OpenCV and LLVM (Windows)
-        if: runner.os == 'Windows'
-        run: choco install opencv llvm -y
-        shell: pwsh
-
-      - name: Set OpenCV env (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          $buildDir = "C:\tools\opencv\build"
-
-          # Find the world lib dynamically
-          $worldLib = Get-ChildItem $buildDir -Recurse -Filter "opencv_world*.lib" | Where-Object { $_.Name -notmatch 'd\.lib$' } | Select-Object -First 1
-          if (-not $worldLib) {
-            Write-Error "Could not find opencv_world*.lib"
-            exit 1
-          }
-          Write-Host "Using OpenCV lib: $($worldLib.FullName)"
-
-          $libDir = $worldLib.DirectoryName
-          $libName = $worldLib.BaseName
-
-          echo "OPENCV_LINK_PATHS=$libDir" >> $env:GITHUB_ENV
-          echo "OPENCV_INCLUDE_PATHS=$buildDir\include" >> $env:GITHUB_ENV
-          echo "OPENCV_LINK_LIBS=$libName" >> $env:GITHUB_ENV
-          echo "LIBCLANG_PATH=C:\Program Files\LLVM\bin" >> $env:GITHUB_ENV
-
-          # Add OpenCV DLLs to PATH so the binding generator can find them at runtime
-          $dllDir = $worldLib.DirectoryName -replace '\\lib$', '\bin'
-          echo "$dllDir" >> $env:GITHUB_PATH
-          echo "C:\Program Files\LLVM\bin" >> $env:GITHUB_PATH
-        shell: pwsh
-
       - name: Cargo build
         run: cargo build --release
 
-      - name: Package (Linux/macOS)
-        if: runner.os != 'Windows'
+      - name: Package
         run: tar czf ${{ matrix.archive }} -C target/release ${{ matrix.artifact }}
-
-      - name: Package (Windows)
-        if: runner.os == 'Windows'
-        run: Compress-Archive -Path target\release\${{ matrix.artifact }} -DestinationPath ${{ matrix.archive }}
-        shell: pwsh
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -153,10 +104,15 @@ jobs:
 
             CLI tool for generating animation inbetween frames using optical flow.
 
+            ### Platforms
+            - **Linux x86_64** — ready to use
+            - **macOS ARM64 (Apple Silicon)** — ready to use
+            - **Windows** — build from source (see below)
+
             ### Requirements
-            - **Linux**: OpenCV 4.x (`sudo apt install libopencv-dev libopencv-contrib-dev`)
-            - **macOS**: OpenCV 4.x (`brew install opencv`)
-            - **Windows**: OpenCV 4.x (included or install via choco)
+            - **Linux**: `sudo apt install libopencv-dev libopencv-contrib-dev`
+            - **macOS**: `brew install opencv`
+            - **Windows**: Install OpenCV 4.x and LLVM, then `cargo build --release` in the `cli/` directory
 
             ### Usage
             ```
